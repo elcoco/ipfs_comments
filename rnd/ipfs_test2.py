@@ -1,121 +1,162 @@
 #!/usr/bin/env python3
 
+import datetime
+import sys
 from pprint import pprint
 import inspect
 import io
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
+import random
 
 import ipfshttpclient
 
+
+def get_rnd_string(length=5):
+    return "".join([ str(chr(round(random.uniform(65,90)))) for i in range(length)])
+
+
 @dataclass
-class BaseObject():
+class RootNode():
     client: ipfshttpclient
+    blogs: List = field(default_factory=list)
+    object_hash: Optional[str] = None
 
-    data: str
-    size: int = 8
+    def build_json(self):
+        res = {}
+        res['Blogs'] = []
 
-    # name of file and link when added to other object
-    name: str = None
-
-    object_hash: str = field(default=None)
-
-
-    def print(self, object_hash=None, spaces=0):
-        """ Recursive print of dag object, get data from network not from objects """
-
-        if object_hash == None:
-            object_hash = self.object_hash
-
-        space = spaces * ' '
-
-        dag = self.client.dag.get(object_hash)
-
-        print(space + "object:", object_hash)
-        print(space + "    data:", dag["data"])
-
-        for link in dag["links"]:
-            if 'Cid' in link.keys():
-                link_hash = link['Cid']['/']
-            else:
-                link_hash = link['Hash']
-
-            # is dag object
-            if link_hash.startswith('ba'):
-                self.print(link_hash, spaces+4)
-
-            # is dir
-            elif link_hash.startswith('Qm') and self.client.dag.get(link_hash)['links']:
-                self.print(link_hash, spaces+4)
-
-            # is file
-            elif link_hash.startswith('Qm'):
-                print(space + "    name:", link["Name"])
-                print(space + "        hash:   ", link_hash)
-                print(space + "        size:   ", link["Size"])
-                print(space + "        content:", self.client.cat(link_hash).decode())
-            else:
-                print("!!! Unknown data type !!!")
-
-
-@dataclass
-class FileObject(BaseObject):
-    def write(self):
-        f = io.BytesIO(self.data.encode())
-        f.name = self.name
-        res = client.add(f)
-        self.size = int(res['Size'])
-        self.object_hash = res['Hash']
+        for blog in self.blogs:
+            res['Blogs'].append(blog.get_json())
         return res
 
-
-@dataclass
-class DagObject(BaseObject):
-    """ Object can contain links to other objects or files """
-    links: list = field(default_factory=list)
-
-    def add_link(self, obj):
-        self.links.append(obj)
-
-    def write(self):
-        obj = self.as_dict()
-        ret = self.client.dag.put(io.BytesIO(json.dumps(obj).encode()))
-        self.object_hash = ret['Cid']['/']
+    def add_blog(self, blog):
+        self.blogs.append(blog)
+        
+    def write_obj(self):
+        res = self.client.dag.put(io.BytesIO(json.dumps(self.build_json()).encode()))
+        self.object_hash = res['Cid']['/']
         return self.object_hash
 
-    def as_dict(self):
-        """ represent object as a dict so we can send it to ipfs client """
-        d = {}
-        d['data'] = self.data
-        d['links'] = []
-        for l in self.links:
-            d['links'].append({ "Name" : l.name,
-                                "Hash" : l.object_hash,
-                                "Size" : l.size})
-        return d
+
+@dataclass
+class Blog():
+    title: str
+    posts: List = field(default_factory=list)
+
+    def get_json(self):
+        res = {}
+        res['Title'] = self.title
+        res['Posts'] = []
+        for post in self.posts:
+            res['Posts'].append(post.get_json())
+        return res
+    
+    def add_post(self, post):
+        self.posts.append(post)
 
 
+@dataclass
+class Post():
+    title: str
+    comments: List = field(default_factory=list)
+
+    def get_json(self):
+        res = {}
+        res['Title'] = self.title
+        res['Comments'] = []
+        for comment in self.comments:
+            res['Comments'].append(comment.get_json())
+        return res
+
+    def add_comment(self, comment):
+        self.comments.append(comment)
+
+
+@dataclass
+class Comment():
+    title: str
+    datetime: str
+    reply_to: Optional[str] #hash
+    content: str
+
+    def get_json(self):
+        res = {}
+        res['Title'] = self.title
+        res['DateTime'] = self.datetime
+        res['ReplyTo'] = self.reply_to
+        res['Content'] = self.content
+        return res
+
+def fancy_print(data, prefix='', indent=0):
+    magenta = "\033[35m"
+    white = "\033[37m"
+    green = "\033[32m"
+    reset = "\033[0m"
+
+    spaces = " " * indent
+    if type(data) == list:
+        print(spaces + prefix + green + "[" + reset)
+        for i,item in enumerate(data):
+            fancy_print(item, prefix=f"[{i}] ", indent=indent+4)
+        print(spaces + green + "]" + reset)
+
+    elif type(data) == dict:
+        print(spaces + magenta + "{" + reset)
+        for k,v in data.items():
+            fancy_print(v, prefix=f"{white}{k}:{reset} ", indent=indent+4)
+        print(spaces + magenta + "}" + reset)
+    else:
+        print(spaces + prefix + str(data))
+
+
+def fancy_print(data, prefix='', indent=0):
+    magenta = "\033[35m"
+    white = "\033[37m"
+    green = "\033[32m"
+    reset = "\033[0m"
+
+    spaces = " " * indent
+    if type(data) == list:
+        print(spaces + prefix + green + f"ARRAY[{len(data)}]" + reset)
+        for i,item in enumerate(data):
+            fancy_print(item, prefix=f"[{i}] ", indent=indent+4)
+
+    elif type(data) == dict:
+        print(spaces + magenta + prefix + "DICT" + reset)
+        for k,v in data.items():
+            fancy_print(v, prefix=f"{white}{k}:{reset} ", indent=indent+4)
+    else:
+        print(spaces + prefix + "\t" + str(data))
+
+        
 with ipfshttpclient.connect() as client:
-    obj_1 = DagObject(client, 'object 1', name='obj1')
-    obj_2 = DagObject(client, 'object 2', name='obj2')
-    obj_3 = DagObject(client, 'object 3', name='obj3')
-    obj_4 = DagObject(client, None, name="nested", object_hash="Qmeixng4edEFCn8YGWvkFNZXPZ9Fphuf6iHb4QaN9Fs3vA")
 
-    obj_1.write()
-    obj_2.write()
-    obj_3.write()
+    root = RootNode(client)
+    for i in range(3):
+        blog = Blog(f"blog_{i}")
+        root.add_blog(blog)
 
-    file_1 = FileObject(client, 'file contents disko!!!', name='file_1.txt')
-    file_1.write()
+        for i in range(3):
+            post = Post(f"post_{i}")
+            blog.add_post(post)
 
-    root_obj = DagObject(client, 'root object contents', name="root object")
-    root_obj.add_link(obj_1)
-    root_obj.add_link(obj_2)
-    root_obj.add_link(obj_3)
-    root_obj.add_link(obj_4)
+            for i in range(3):
+                comment = Comment(f"super_title_{i}",
+                                  "2021-02-33 23:34",
+                                  None,
+                                  "post content")
+                post.add_comment(comment)
 
-    root_obj.add_link(file_1)
+    root_hash = root.write_obj()
 
-    root_obj.write()
-    root_obj.print()
+    fancy_print(client.dag.get(root_hash).as_json())
+    print(root_hash)
+    #fancy_print(root.build_json())
+
+
+
+
+
+
