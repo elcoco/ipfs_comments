@@ -1,162 +1,144 @@
 #!/usr/bin/env python3
 
-import datetime
 import sys
 from pprint import pprint
 import inspect
 import io
 import json
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List
 import random
 
 import ipfshttpclient
 
 
-def get_rnd_string(length=5):
-    return "".join([ str(chr(round(random.uniform(65,90)))) for i in range(length)])
+class NodeBaseClass():
+    def __init__(self, client:ipfshttpclient, name:str=None):
+        self._client = client
+        self._name = name
+        self._cid = None
+        self._json = {"Name" : self._name}
+
+    @property
+    def json(self):
+        return self._json
+
+    @property
+    def cid(self):
+        return self._cid
+
+    @property
+    def name(self):
+        return self._name
+
+    def print(self, data=None, indent=0, prefix=''):
+        magenta = "\033[35m"
+        white = "\033[37m"
+        green = "\033[32m"
+        reset = "\033[0m"
+
+        if data == None:
+            data = self._client.dag.get(self._cid).as_json()
+
+        spaces = " " * indent
+
+        if type(data) == list:
+            print(spaces + prefix + green + f"ARRAY[{len(data)}]" + reset)
+            for i,item in enumerate(data):
+                self.print(item, prefix=f"[{i}] ", indent=indent+2)
+
+        elif type(data) == dict:
+            print(spaces + magenta + prefix + "DICT" + reset)
+            for k,v in data.items():
+                if k == '/':
+                    d = self._client.dag.get(v).as_json()
+                    self.print(d, prefix=f"{white}{k}:{reset} ", indent=indent+2)
+                else:
+                    if v == None:
+                        continue
+                    self.print(v, prefix=f"{white}{k}:{reset} ", indent=indent+2)
+        else:
+            print(spaces + prefix + "\t" + str(data))
+
+    def add_link(self, key, node):
+        """ Append a link in the list at key """
+        if not key in self._json.keys():
+            self._json[key] = []
+
+        link = {node.name: {'/' : node.cid}}
+        self._json[key].append(link)
+
+    def write(self):
+        res = self._client.dag.put(io.BytesIO(json.dumps(self._json).encode()))
+        self._cid = res['Cid']['/']
+        return self._cid
 
 
-@dataclass
-class RootNode():
-    client: ipfshttpclient
-    blogs: List = field(default_factory=list)
-    object_hash: Optional[str] = None
-
-    def build_json(self):
-        res = {}
-        res['Blogs'] = []
-
-        for blog in self.blogs:
-            res['Blogs'].append(blog.get_json())
-        return res
-
-    def add_blog(self, blog):
-        self.blogs.append(blog)
-        
-    def write_obj(self):
-        res = self.client.dag.put(io.BytesIO(json.dumps(self.build_json()).encode()))
-        self.object_hash = res['Cid']['/']
-        return self.object_hash
+class RootNode(NodeBaseClass):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._json["Sites"] = []
 
 
-@dataclass
-class Blog():
-    title: str
-    posts: List = field(default_factory=list)
-
-    def get_json(self):
-        res = {}
-        res['Title'] = self.title
-        res['Posts'] = []
-        for post in self.posts:
-            res['Posts'].append(post.get_json())
-        return res
-    
-    def add_post(self, post):
-        self.posts.append(post)
+class SiteNode(NodeBaseClass):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._json["Blogs"] = []
+        self._json["Pages"] = []
 
 
-@dataclass
-class Post():
-    title: str
-    comments: List = field(default_factory=list)
+class BlogNode(NodeBaseClass):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._json["Posts"] = []
 
-    def get_json(self):
-        res = {}
-        res['Title'] = self.title
-        res['Comments'] = []
-        for comment in self.comments:
-            res['Comments'].append(comment.get_json())
-        return res
-
-    def add_comment(self, comment):
-        self.comments.append(comment)
+class PostNode(NodeBaseClass):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._json["Comments"] = []
 
 
-@dataclass
-class Comment():
-    title: str
-    datetime: str
-    reply_to: Optional[str] #hash
-    content: str
-
-    def get_json(self):
-        res = {}
-        res['Title'] = self.title
-        res['DateTime'] = self.datetime
-        res['ReplyTo'] = self.reply_to
-        res['Content'] = self.content
-        return res
-
-def fancy_print(data, prefix='', indent=0):
-    magenta = "\033[35m"
-    white = "\033[37m"
-    green = "\033[32m"
-    reset = "\033[0m"
-
-    spaces = " " * indent
-    if type(data) == list:
-        print(spaces + prefix + green + "[" + reset)
-        for i,item in enumerate(data):
-            fancy_print(item, prefix=f"[{i}] ", indent=indent+4)
-        print(spaces + green + "]" + reset)
-
-    elif type(data) == dict:
-        print(spaces + magenta + "{" + reset)
-        for k,v in data.items():
-            fancy_print(v, prefix=f"{white}{k}:{reset} ", indent=indent+4)
-        print(spaces + magenta + "}" + reset)
-    else:
-        print(spaces + prefix + str(data))
+class CommentNode(NodeBaseClass):
+    def __init__(self, author, date_time, reply_to, content, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._json["Author"] = author
+        self._json["DateTime"] = date_time
+        self._json["ReplyTo"] = reply_to
+        self._json["Content"] = content
 
 
-def fancy_print(data, prefix='', indent=0):
-    magenta = "\033[35m"
-    white = "\033[37m"
-    green = "\033[32m"
-    reset = "\033[0m"
-
-    spaces = " " * indent
-    if type(data) == list:
-        print(spaces + prefix + green + f"ARRAY[{len(data)}]" + reset)
-        for i,item in enumerate(data):
-            fancy_print(item, prefix=f"[{i}] ", indent=indent+4)
-
-    elif type(data) == dict:
-        print(spaces + magenta + prefix + "DICT" + reset)
-        for k,v in data.items():
-            fancy_print(v, prefix=f"{white}{k}:{reset} ", indent=indent+4)
-    else:
-        print(spaces + prefix + "\t" + str(data))
-
-        
 with ipfshttpclient.connect() as client:
 
-    root = RootNode(client)
-    for i in range(3):
-        blog = Blog(f"blog_{i}")
-        root.add_blog(blog)
+    root = RootNode(client, 'disko')
+    for i in range(2):
+        site = SiteNode(client, f"site_{i}")
 
-        for i in range(3):
-            post = Post(f"post_{i}")
-            blog.add_post(post)
+        for i in range(1):
+            blog = BlogNode(client, f"blog_{i}")
 
             for i in range(3):
-                comment = Comment(f"super_title_{i}",
-                                  "2021-02-33 23:34",
-                                  None,
-                                  "post content")
-                post.add_comment(comment)
+                post = PostNode(client, f"post_{i}")
 
-    root_hash = root.write_obj()
+                for i in range(3):
+                    comment = CommentNode("bever",
+                                          "2021-02-33 23:34",
+                                          None,
+                                          "post content",
+                                          client,
+                                          f"comment_title_{i}")
+                    comment.write()
+                    post.add_link("Comments", comment)
 
-    fancy_print(client.dag.get(root_hash).as_json())
-    print(root_hash)
-    #fancy_print(root.build_json())
+                post.write()
+                blog.add_link("Posts", post)
 
+            blog.write()
+            site.add_link("Blogs", blog)
 
+        site.write()
+        root.add_link("Sites", site)
 
-
-
-
+    root.write()
+    root.print()
+    print(root.cid)
+    sys.exit()
