@@ -3,10 +3,10 @@ import datetime
 from flask import jsonify
 
 
-def message(msg='', data={}):
+def message(msg='', payload={}):
     d = {}
     d["message"] = msg
     d["status_code"] = 200
-    d["payload"] = data
+    d["payload"] = payload
     d["time"] = datetime.datetime.utcnow()
     return jsonify(d)

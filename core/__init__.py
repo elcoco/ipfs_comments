@@ -11,7 +11,7 @@ plugin_manager = PluginManager()
 
 # add plugin manager hooks that plugins can subscribe to
 plugin_manager.register_hook('add_comment', run_policy=Policy.FIRST)
-plugin_manager.register_hook('get_comments', run_policy=Policy.FIRST)
+plugin_manager.register_hook('get_post_comments', run_policy=Policy.FIRST)
 
 # initialize plugins, this also adds the plugin templates path to jinja2 env
 plugin_manager.load_plugins(['ipfs'])
