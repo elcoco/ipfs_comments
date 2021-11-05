@@ -3,7 +3,7 @@ import datetime
 from flask import jsonify
 
 
-def message(msg='', payload={}):
+def message(msg='ok', payload={}):
     d = {}
     d["message"] = msg
     d["status_code"] = 200

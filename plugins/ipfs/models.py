@@ -33,7 +33,7 @@ class NodeBaseClass():
     def name(self):
         return self._name
 
-    def from_cid(self, cid):
+    def read_node(self, cid):
         """ Read full tree from cid, override this function """
         pass
 
@@ -75,7 +75,7 @@ class NodeBaseClass():
         self._json[key].append(link)
 
     def write(self):
-        res = self._client.dag.put(io.BytesIO(json.dumps(self._json).encode()))
+        res = self._client.dag.put(io.BytesIO(json.dumps(self.get_json()).encode()))
         self._cid = res['Cid']['/']
         return self._cid
 
@@ -94,7 +94,7 @@ class NodeBaseClass():
         nodes = []
         for item in node_json:
             node = _class(self._client, item['Name'])
-            node.from_cid(item[item['Name']]['/'])
+            node.read_node(item[item['Name']]['/'])
             nodes.append(node)
 
         return nodes
@@ -105,12 +105,14 @@ class RootNode(NodeBaseClass):
         super().__init__(*args, **kwargs)
         self.sites = []
 
-    def from_cid(self, cid):
+    def read_node(self, cid):
         """ Read object from ipld, retrieve children """
         self.sites = self.node_factory('Sites', cid, SiteNode)
+        self._cid = cid
 
     def get_json(self):
-        self._json["Sites"] = [s.get_json() for s in self.sites]
+        for s in self.sites:
+            self.add_link("Sites", s)
         return self._json
 
     def get_comments(self, site_id, blog_id, post_id):
@@ -120,7 +122,24 @@ class RootNode(NodeBaseClass):
             post = next(iter([x for x in blog.posts if x.name == post_id]))
             return post.comments
         except StopIteration as e:
-            logger.error(f"Failed to find comments for: {site_id}>{blog_id}>{post_id}, {e}")
+            logger.error(f"Failed to find comments for: {site_id}>{blog_id}>{post_id}, error={e}")
+
+    def write_tree(self):
+        blogs = [b for sublist in self.sites for b in sublist.blogs]
+        posts = [p for sublist in blogs for p in sublist.posts]
+        comments = [c for sublist in posts for c in sublist.comments]
+
+        for c in comments:
+            c.write()
+        for p in posts:
+            p.write()
+        for b in blogs:
+            b.write()
+        for s in self.sites:
+            s.write()
+
+        self.write()
+
 
 
 
@@ -129,12 +148,14 @@ class SiteNode(NodeBaseClass):
         super().__init__(*args, **kwargs)
         self.blogs = []
 
-    def from_cid(self, cid):
+    def read_node(self, cid):
         """ Read object from ipld, retrieve children """
         self.blogs = self.node_factory('Blogs', cid, BlogNode)
+        self._cid = cid
 
     def get_json(self):
-        self._json["Blogs"] = [b.get_json() for b in self.blogs]
+        for b in self.blogs:
+            self.add_link("Blogs", b)
         return self._json
 
 
@@ -143,12 +164,14 @@ class BlogNode(NodeBaseClass):
         super().__init__(*args, **kwargs)
         self.posts = []
 
-    def from_cid(self, cid):
+    def read_node(self, cid):
         """ Read object from ipld, retrieve children """
         self.posts = self.node_factory('Posts', cid, PostNode)
+        self._cid = cid
 
     def get_json(self):
-        self._json["Posts"] = [p.get_json() for p in self.posts]
+        for p in self.posts:
+            self.add_link("Posts", p)
         return self._json
 
 
@@ -157,12 +180,14 @@ class PostNode(NodeBaseClass):
         super().__init__(*args, **kwargs)
         self.comments = []
 
-    def from_cid(self, cid):
+    def read_node(self, cid):
         """ Read object from ipld, retrieve children """
         self.comments = self.node_factory('Comments', cid, CommentNode)
+        self._cid = cid
 
     def get_json(self):
-        self._json["Comments"] = [c.get_json() for c in self.comments]
+        for c in self.comments:
+            self.add_link("Comments", c)
         return self._json
 
 
@@ -174,7 +199,7 @@ class CommentNode(NodeBaseClass):
         self.reply_to = reply_to
         self.content = content
 
-    def from_cid(self, cid):
+    def read_node(self, cid):
         node_json = self.get_dag(cid)
         try:
             self.author = node_json['Author']
@@ -183,6 +208,7 @@ class CommentNode(NodeBaseClass):
             self.content = node_json['Content']
         except KeyError as e:
             print("Missing key:",e)
+        self._cid = cid
 
     def get_json(self):
         self._json['Author'] = self.author
@@ -191,11 +217,15 @@ class CommentNode(NodeBaseClass):
         self._json['Content'] = self.content
         return self._json
 
+
+
 def load_node(cid):
     with ipfshttpclient.connect() as client:
         root = RootNode(client, 'root')
-        root.from_cid(cid)
+        root.read_node(cid)
         return root
+
+
 
 def write_node():
     with ipfshttpclient.connect() as client:
