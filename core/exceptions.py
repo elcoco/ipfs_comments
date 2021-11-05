@@ -2,7 +2,7 @@
 import logging
 import datetime
 
-logger = logging.getLogger('')
+logger = logging.getLogger('app')
 
 class APIException(Exception): pass
 

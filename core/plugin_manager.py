@@ -10,7 +10,7 @@ from pathlib import Path
 import importlib
 from enum import Enum, auto
 
-logger = logging.getLogger('')
+logger = logging.getLogger('app')
 
 
 class PluginException(Exception):

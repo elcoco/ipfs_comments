@@ -10,9 +10,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 import random
 
+from core.exceptions import NotFoundError
+
 import ipfshttpclient
 
-logger = logging.getLogger('')
+logger = logging.getLogger('app')
 
 class NodeBaseClass():
     def __init__(self, client:ipfshttpclient, name:str=None, cid=None):
@@ -122,7 +124,13 @@ class RootNode(NodeBaseClass):
             post = next(iter([x for x in blog.posts if x.name == post_id]))
             return post.comments
         except StopIteration as e:
-            logger.error(f"Failed to find comments for: {site_id}>{blog_id}>{post_id}, error={e}")
+            raise NotFoundError(f"Failed to find comments for: {site_id}>{blog_id}>{post_id}, error={e}", trace=e)
+
+    def get_site(self, site_id):
+        try:
+            return next(iter(x for x in self.sites if x.name == site_id))
+        except StopIteration as e:
+            raise NotFoundError(f"Failed to find {site_id}", trace=e)
 
     def write_tree(self):
         blogs = [b for sublist in self.sites for b in sublist.blogs]
@@ -141,8 +149,6 @@ class RootNode(NodeBaseClass):
         self.write()
 
 
-
-
 class SiteNode(NodeBaseClass):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -152,6 +158,12 @@ class SiteNode(NodeBaseClass):
         """ Read object from ipld, retrieve children """
         self.blogs = self.node_factory('Blogs', cid, BlogNode)
         self._cid = cid
+
+    def get_blog(self, blog_id):
+        try:
+            return next(iter(x for x in self.blogs if x.name == blog_id))
+        except StopIteration as e:
+            raise NotFoundError(f"Failed to find {blog_id}", trace=e)
 
     def get_json(self):
         for b in self.blogs:
@@ -163,6 +175,12 @@ class BlogNode(NodeBaseClass):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.posts = []
+
+    def get_post(self, post_id):
+        try:
+            return next(iter(x for x in self.posts if x.name == post_id))
+        except StopIteration as e:
+            raise NotFoundError(f"Failed to find {post_id}", trace=e)
 
     def read_node(self, cid):
         """ Read object from ipld, retrieve children """
