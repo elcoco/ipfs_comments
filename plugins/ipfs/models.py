@@ -17,11 +17,14 @@ import ipfshttpclient
 logger = logging.getLogger('app')
 
 class NodeBaseClass():
-    def __init__(self, client:ipfshttpclient, name:str=None, cid=None):
+    """ These classes represent the IPFS tree.
+        A full tree can be read from IPFS, changed and written back. """
+    def __init__(self, client:ipfshttpclient, name:str=None, cid=None, parent=None):
         self._client = client
         self._name = name
         self._cid = None
         self._json = {"Name" : self._name}
+        self._parent = parent
 
     @property
     def json(self):
@@ -34,10 +37,6 @@ class NodeBaseClass():
     @property
     def name(self):
         return self._name
-
-    def read_node(self, cid):
-        """ Read full tree from cid, override this function """
-        pass
 
     def print(self, data=None, indent=0, prefix=''):
         magenta = "\033[35m"
@@ -77,29 +76,39 @@ class NodeBaseClass():
         self._json[key].append(link)
 
     def write(self):
+        """ Write object to IPFS """
         res = self._client.dag.put(io.BytesIO(json.dumps(self.get_json()).encode()))
         self._cid = res['Cid']['/']
         return self._cid
 
     def get_dag(self, cid):
+        """ Get dag object from IPFS """
         return self._client.dag.get(cid).as_json()
 
     def node_factory(self, key, cid, _class):
-        """ Create object from _class if key is found in ipfs data
-            from cid """
+        """ Create object from _class if key is found in ipfs data """
         try:
             node_json = self.get_dag(cid)[key]
         except KeyError as e:
-            print("Failed to find", e)
-            return
+            raise NotFoundError("Failed to find key", trace=e)
 
         nodes = []
         for item in node_json:
-            node = _class(self._client, item['Name'])
+            node = _class(self._client, item['Name'], parent=self)
             node.read_node(item[item['Name']]['/'])
             nodes.append(node)
 
         return nodes
+
+    def write_branch(self):
+        """ Write branch from tree up all the way to the root node, leave other branches unchanged """
+        parent = self
+
+        while parent != None:
+            logger.debug(f">>>> writing: {parent.name}")
+            parent.write()
+            parent = parent._parent
+
 
 
 class RootNode(NodeBaseClass):
@@ -107,14 +116,17 @@ class RootNode(NodeBaseClass):
         super().__init__(*args, **kwargs)
         self.sites = []
 
+        self.links = {}
+        self.links['sites'] = []
+
     def read_node(self, cid):
         """ Read object from ipld, retrieve children """
-        self.sites = self.node_factory('Sites', cid, SiteNode)
+        self.sites = self.node_factory('sites', cid, SiteNode)
         self._cid = cid
 
     def get_json(self):
         for s in self.sites:
-            self.add_link("Sites", s)
+            self.add_link("sites", s)
         return self._json
 
     def get_comments(self, site_id, blog_id, post_id):
@@ -133,6 +145,7 @@ class RootNode(NodeBaseClass):
             raise NotFoundError(f"Failed to find {site_id}", trace=e)
 
     def write_tree(self):
+        """ Write full tree to IPFS """
         blogs = [b for sublist in self.sites for b in sublist.blogs]
         posts = [p for sublist in blogs for p in sublist.posts]
         comments = [c for sublist in posts for c in sublist.comments]
@@ -156,7 +169,7 @@ class SiteNode(NodeBaseClass):
 
     def read_node(self, cid):
         """ Read object from ipld, retrieve children """
-        self.blogs = self.node_factory('Blogs', cid, BlogNode)
+        self.blogs = self.node_factory('blogs', cid, BlogNode)
         self._cid = cid
 
     def get_blog(self, blog_id):
@@ -167,7 +180,7 @@ class SiteNode(NodeBaseClass):
 
     def get_json(self):
         for b in self.blogs:
-            self.add_link("Blogs", b)
+            self.add_link("blogs", b)
         return self._json
 
 
@@ -184,12 +197,12 @@ class BlogNode(NodeBaseClass):
 
     def read_node(self, cid):
         """ Read object from ipld, retrieve children """
-        self.posts = self.node_factory('Posts', cid, PostNode)
+        self.posts = self.node_factory('posts', cid, PostNode)
         self._cid = cid
 
     def get_json(self):
         for p in self.posts:
-            self.add_link("Posts", p)
+            self.add_link("posts", p)
         return self._json
 
 
@@ -200,12 +213,12 @@ class PostNode(NodeBaseClass):
 
     def read_node(self, cid):
         """ Read object from ipld, retrieve children """
-        self.comments = self.node_factory('Comments', cid, CommentNode)
+        self.comments = self.node_factory('comments', cid, CommentNode)
         self._cid = cid
 
     def get_json(self):
         for c in self.comments:
-            self.add_link("Comments", c)
+            self.add_link("comments", c)
         return self._json
 
 
@@ -220,24 +233,27 @@ class CommentNode(NodeBaseClass):
     def read_node(self, cid):
         node_json = self.get_dag(cid)
         try:
-            self.author = node_json['Author']
-            self.datetime = node_json['DateTime']
-            self.reply_to = node_json['ReplyTo']
-            self.content = node_json['Content']
+            self.author = node_json['author']
+            self.datetime = node_json['datetime']
+            self.reply_to = node_json['reply_to']
+            self.content = node_json['content']
         except KeyError as e:
             print("Missing key:",e)
         self._cid = cid
 
     def get_json(self):
-        self._json['Author'] = self.author
-        self._json['Datetime'] = self.datetime
-        self._json['ReplyTo'] = self.reply_to
-        self._json['Content'] = self.content
+        self._json['author'] = self.author
+        self._json['datetime'] = self.datetime
+        self._json['reply_to'] = self.reply_to
+        self._json['content'] = self.content
         return self._json
 
 
 
-def load_node(cid):
+def load_tree(cid):
+    """ Load a full node tree from IPFS.
+        Returns: RootNode """
+
     with ipfshttpclient.connect() as client:
         root = RootNode(client, 'root')
         root.read_node(cid)
@@ -245,7 +261,7 @@ def load_node(cid):
 
 
 
-def write_node():
+def write_example_node():
     with ipfshttpclient.connect() as client:
 
         root = RootNode(client, 'disko')
@@ -266,26 +282,18 @@ def write_node():
                                               reply_to=None,
                                               content="post content")
                         comment.write()
-                        post.add_link("Comments", comment)
+                        post.add_link("comments", comment)
 
                     post.write()
-                    blog.add_link("Posts", post)
+                    blog.add_link("posts", post)
 
                 blog.write()
-                site.add_link("Blogs", blog)
+                site.add_link("blogs", blog)
 
             site.write()
-            root.add_link("Sites", site)
+            root.add_link("sites", site)
 
         root.write()
         #root.print()
         print(">>>>>>>>>>>>>>>>", root.cid)
         return root
-
-
-def get_dag(cid):
-    with ipfshttpclient.connect() as client:
-        return client.dag.get(cid)
-
-
-

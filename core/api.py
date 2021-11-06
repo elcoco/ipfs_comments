@@ -52,7 +52,7 @@ def requires_post_data(func):
 def get_comment(site_id, blog_id, post_id):
 
     # call plugins to create extra pages, eg: rss, site_map etc...
-    res = plugin_manager.run_hook('get_post_comments', site_id, blog_id, post_id)
+    res = plugin_manager.run_hook('get_comments', site_id, blog_id, post_id)
 
     #raise InternalServerError("disko", trace={"bla": "bla"})
     return message(payload=res)
