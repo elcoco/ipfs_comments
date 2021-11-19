@@ -9,4 +9,7 @@ def message(msg='ok', payload={}):
     d["status_code"] = 200
     d["payload"] = payload
     d["time"] = datetime.datetime.utcnow()
-    return jsonify(d)
+
+    response = jsonify(d)
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response

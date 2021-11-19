@@ -5,13 +5,14 @@ import logging
 from pathlib import Path
 from pprint import pprint
 import datetime
+from typing import Dict, List
 
 from core import plugin_manager
 from core import config
+from core.exceptions import BadRequestError
 
 
-from plugins.ipfs.models import load_tree
-from plugins.ipfs.models import CommentNode
+from plugins.ipfs.models import Root, Comment
 
 import ipfshttpclient
 
@@ -22,51 +23,51 @@ class Plugin():
     def __init__(self):
         self.name = 'ipfs'
 
-    def get_comments(self, site_id, blog_id, post_id):
-        root_cid = config['plugins']["ipfs"]["root_cid"]
-        print(root_cid)
-        if not root_cid:
-            raise NotFoundError("No CID found in config file")
+        # write brand new dag if it doesn't exist yet
+        if not config['plugins']["ipfs"]["root_cid"]:
+            with ipfshttpclient.connect() as client:
+                print("No CID found in config file, generating new DAG")
+                root = Root(client)
+                root.write()
+                config['plugins']["ipfs"]["root_cid"] = root.cid
+                config.write()
+                print(f"Created new dag: {root.cid}")
 
-        root = load_tree(root_cid)
-
-        comments = root.get_comments(site_id, blog_id, post_id)
-        if not comments:
-            return
-
-        return [c.get_json() for c in comments]
-
-    def add_comment(self, site_id, blog_id, post_id, data):
-        root_cid = config['plugins']["ipfs"]["root_cid"]
-        if not root_cid:
-            raise NotFoundError("No CID found in config file")
-
-        # read full tree from IPFS and create model
-        root = load_tree(root_cid)
-
-        # try to find the post where the comment should be added to
-        site = root.get_site(site_id)
-        blog = site.get_blog(blog_id)
-        post = blog.get_post(post_id)
-
-        # create and write comment to IPFS
+    def get_comments(self, page_id: str) -> List[Dict]:
         with ipfshttpclient.connect() as client:
-            data["datetime"] = str(datetime.datetime.utcnow())
-            comment = CommentNode(client, **data, parent=post)
+            root = Root(client)
+            root.read_from_cid(config['plugins']["ipfs"]["root_cid"])
+
+        return root.get_comments(page_id)
+
+    def ipns_publish(self, cid: str, key: str=None):
+        logger.debug("Starting publish to IPNS")
+        with ipfshttpclient.connect() as client:
+            response = client.name.publish(cid, key=key)
+        logger.debug(f"Published CID to {response['Name']}")
+
+    def add_comment(self, page_id: str, data: Dict) -> Dict:
+        with ipfshttpclient.connect() as client:
+            root = Root(client)
+            root.read_from_cid(config['plugins']["ipfs"]["root_cid"])
+
+            comment = Comment(client,
+                              page_id = page_id,
+                              author = data["author"],
+                              content = data["content"])
             comment.write()
 
-        # add comment to post and write branch up to the root node
-        post.add_link("comments", comment)
-        comment.write_branch()
+            root.add_comment(comment)
+            cid = root.write()
 
         # save and write changed root_cid to disk
-        config['plugins']['ipfs']['root_cid'] = root.cid
+        config['plugins']['ipfs']['root_cid'] = cid
         config.write()
-                              
-        logger.debug(">>>> Root CID: "+ root.cid)
-        return comment.get_json()
-         
 
+        #self.ipns_publish(cid)
+                              
+        logger.debug(">>>> Root CID: "+ cid)
+        return comment.get_json()
 
 
 def register():

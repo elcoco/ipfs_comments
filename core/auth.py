@@ -2,81 +2,87 @@
 
 import logging
 import datetime
-
+from typing import Callable, Optional
 from passlib.hash import sha256_crypt
-from flask_jwt_extended import create_access_token
-from sqlalchemy.exc import SQLAlchemyError
+from functools import wraps
 
-from flask_jwt_extended import get_jwt_identity 
+from core.exceptions import AuthUserNotFoundError, AuthUserNotAddedError, AuthUserNotChangedError, UnauthorizedError
 
-from core import db
-from core.models import User
-from core.exceptions import AuthUserNotFoundError, AuthUserNotAddedError, AuthUserNotChangedError
-from core.utils import get_password_hash
+from flask_jwt_extended import create_access_token, get_jwt_identity 
 
 logger = logging.getLogger('app')
 
+
 class Auth():
-    def verify_password(self, username, password):
-        user = User.query.filter_by(username=username).first()
-        return sha256_crypt.verify(password, user.password)
+    def __init__(self, config):
+        self._config = config
+        self._db = config["core"]["users"]
 
-    def check_user_identity(self):
-        """ Check if JWT token identity exists in user table, and if user has admin permissions """
-        return User.query.filter_by(username=get_jwt_identity(), admin=True).first()
+    def require_admin_identity(self, func: Callable):
+        """ Decorator function that checks if token identity corresponds
+            with an admin user id from the database """
+        @wraps(func)
+        def inside(*args, **kwargs):
+            try:
+                username = get_jwt_identity()["username"]
+            except KeyError as e:
+                logger.error(f"Unauthorized: failed to get JWT identity")
+                raise UnauthorizedError
+            except TypeError as e:
+                logger.error(f"Unauthorized: failed to get JWT identity")
+                raise UnauthorizedError
+            else:
+                if not self.user_is_admin(username):
+                    logger.error(f"Unauthorized: user {username} is not an admin")
+                    raise UnauthorizedError
+                return func(*args, **kwargs)
+        return inside
 
-    def user_exists(self, username=False, user_id=False):
-        if username:
-            return User.query.filter_by(username=username).first()
-        elif user_id:
-            return User.query.get(user_id)
+    def verify_password(self, username: str, password: str) -> Optional[bool]:
+        user = self.user_exists(username)
+        if user:
+            return sha256_crypt.verify(password, user['password'])
 
-    def user_is_admin(self, username):
-        return User.query.filter_by(username=username, admin=True).first()
+    def get_password_hash(self, password: str) -> str:
+        return sha256_crypt.hash(password)
 
-    def add_user(self, data):
-        """ create user from Dict """
-        user = User()
-
-        for k,v in data.items():
-            if not hasattr(user, k):
-                raise AuthUserNotAddedError(f"No such attribute: {k}")
-
-            # TODO do some password testing
-            if k == "password":
-                v = get_password_hash(str(v))
-
-            setattr(user, k, v)
-
-        db.session.add(user)
-        # create row in SQL user table
+    def user_exists(self, username: str) -> dict:
         try:
-            db.session.commit()
-            return user
-        except SQLAlchemyError as e:
-            raise AuthUserNotAddedError(e)
+            return next(iter([u for u in self._db if u['username'] == username]))
+        except StopIteration:
+            logger.error(f"User {username} not found")
 
-    def update_user(self, user, data):
-        """ update user from Dict """
-        for k,v in data.items():
-            if not hasattr(user, k):
-                raise AuthUserNotChangedError(f"Wrong type, {k} does not exist in table")
-
-            # TODO do some password testing
-            if k == "password":
-                v = get_password_hash(str(v))
-
-            setattr(user, k, v)
-
+    def user_is_admin(self, username: str) -> Optional[dict]:
         try:
-            db.session.commit()
-            return user
-        except SQLAlchemyError as e:
-            raise AuthUserNotChangedError(e)
+            return next(iter([u for u in self._db if u['username'] == username and u['admin']]))
+        except KeyError:
+            logger.error(f"User {username} not admin")
+        except StopIteration:
+            logger.error(f"User {username} not found")
 
-    def get_token(self, identity, token_expiration_days=1000000):
+    def add_user(self, username: str, password: str, admin: bool=False):
+        """ Create/update user """
+        user = self.user_exists(username)
+        if not user:
+            user = {}
+            self._db.append(user)
+
+        user["username"] = username
+        user["password"] = self.get_password_hash(password)
+        user["admin"] = admin
+
+        self._config.write()
+        return user
+
+    def del_user(self, username: str):
+        user = self.user_exists(username)
+        self._db.remove(user)
+        self._config.write()
+        return user
+
+    def get_token(self, identity: str, token_expiration_days: int=1000000):
         return create_access_token(identity=identity, expires_delta=datetime.timedelta(days=int(token_expiration_days)))
 
-    def get_user_token(self, user, token_expiration_days=1000000):
-        identity_json = {"user_id" : user.user_id, "username": user.username}
+    def get_user_token(self, username: str, token_expiration_days: int=1000000):
+        identity_json = {"username": username}
         return self.get_token(identity_json, token_expiration_days=int(token_expiration_days))
