@@ -35,7 +35,7 @@ class NodeBaseClass():
 
 
 class Comment(NodeBaseClass):
-    def __init__(self, client:ipfshttpclient, page_id=None, author=None, content=None):
+    def __init__(self, client:ipfshttpclient, page_id=None, author=None, reply_to=None, content=None):
         super().__init__(client)
 
         #self.datetime = datetime.datetime.utcnow().timestamp()
@@ -43,6 +43,7 @@ class Comment(NodeBaseClass):
         self.page_id = page_id
         self.author = author
         self.content = content
+        self.reply_to = reply_to
         self.id = str(hashlib.sha256((str(self.datetime) + str(self.author) + str(self.content)).encode()).hexdigest())
         self._client = client
 
@@ -50,6 +51,8 @@ class Comment(NodeBaseClass):
         return { "author"  :  self.author,
                  "dateTime" : self.datetime,
                  "content" :  self.content,
+                 "cid" :      self.cid,
+                 "replyTo" :  self.reply_to,
                  "id":        self.id }
 
     def read_from_cid(self, cid):
@@ -58,6 +61,7 @@ class Comment(NodeBaseClass):
         self.content = dag["content"]
         self.datetime = dag["dateTime"]
         self.id = dag["id"]
+        self.reply_to = dag["replyTo"]
         self.cid = cid
 
 

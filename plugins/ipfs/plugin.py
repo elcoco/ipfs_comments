@@ -54,6 +54,7 @@ class Plugin():
             comment = Comment(client,
                               page_id = page_id,
                               author = data["author"],
+                              reply_to = data["replyTo"],
                               content = data["content"])
             comment.write()
 

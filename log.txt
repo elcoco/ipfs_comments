@@ -1,0 +1,9 @@
+DEBUG __init__.<module>    97 Updating admin user from config file
+ * Serving Flask app 'core' (lazy loading)
+ * Environment: production
+   WARNING: This is a development server. Do not use it in a production deployment.
+   Use a production WSGI server instead.
+ * Debug mode: on
+DEBUG __init__.<module>    97 Updating admin user from config file
+0 -->  ['8064e4eb7045ffd1f5d41d2ca78f59c13a7819f1539ace641fd794cb22ff2c92']
+8064e4eb7045ffd1f5d41d2ca78f59c13a7819f1539ace641fd794cb22ff2c92

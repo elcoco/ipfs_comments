@@ -138,10 +138,30 @@ class APIUser():
 
 
 class APIComments():
+    def sort_comments(self, comments, _id=None, level=0):
+        ret = []
+
+        cur_level = [c for c in comments if not c["replyTo"] or c["replyTo"] == _id]
+
+        for c in cur_level:
+
+            cs = [x for x in comments if x not in cur_level]
+            ret.append(self.sort_comments(cs, c["id"], level+1))
+
+        return ret
+
+    def print_comments(self, comments, spacing=0):
+        space = ' ' * spacing
+
+        for c in comments:
+            pass
+
+
     def get_comments(self, page_id):
         # call plugins manager
         res = plugin_manager.run_hook('get_comments', page_id)
         return message(payload=res)
+        #return message(payload=self.sort_comments(res))
 
     @require_post_data
     @captcha.require_captcha
@@ -151,10 +171,13 @@ class APIComments():
             comment = request.json["comment"]
             comment["author"] = escape(comment["author"])
             comment["content"] = escape(comment["content"])
+            comment["replyTo"] = escape(comment["replyTo"])
         except KeyError as e:
+            print(f"Missing keys: {e}")
             raise BadRequestError(f"Missing keys: {e}")
+        print(comment)
 
-        if None in [None for x in comment.values() if not x]:
+        if not (comment['author'] and comment['content']):
             raise BadRequestError(f"Missing values")
 
         res = plugin_manager.run_hook('add_comment', page_id, comment)
