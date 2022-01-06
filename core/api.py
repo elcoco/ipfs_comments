@@ -2,7 +2,7 @@ import logging
 from pprint import pprint
 from functools import wraps
 
-from core import app, auth, config, plugin_manager, captcha
+from core import app, auth, config, plugin_manager, captcha, ip_logger
 from core.messages import message
 
 from core.exceptions import AuthException, AuthUserNotAddedError, AuthUserNotChangedError
@@ -20,6 +20,8 @@ from flask import escape
 from flask_jwt_extended import jwt_required, get_jwt_identity 
 
 logger = logging.getLogger('app')
+
+# TODO iplogger should have category support, we want to be able to get a page and get comments at the same time
 
 # handle error messages
 @app.errorhandler(UnauthorizedError)
@@ -138,33 +140,13 @@ class APIUser():
 
 
 class APIComments():
-    def sort_comments(self, comments, _id=None, level=0):
-        ret = []
-
-        cur_level = [c for c in comments if not c["replyTo"] or c["replyTo"] == _id]
-
-        for c in cur_level:
-
-            cs = [x for x in comments if x not in cur_level]
-            ret.append(self.sort_comments(cs, c["id"], level+1))
-
-        return ret
-
-    def print_comments(self, comments, spacing=0):
-        space = ' ' * spacing
-
-        for c in comments:
-            pass
-
-
     def get_comments(self, page_id):
-        # call plugins manager
         res = plugin_manager.run_hook('get_comments', page_id)
         return message(payload=res)
-        #return message(payload=self.sort_comments(res))
 
     @require_post_data
     @captcha.require_captcha
+    @ip_logger.check_ddos
     def post_comment(self, page_id):
         # escape data for safety and stuff
         try:

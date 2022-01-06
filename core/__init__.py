@@ -7,6 +7,7 @@ import logging
 from core.plugin_manager import PluginManager
 from core.plugin_manager import Policy
 from core.config import Config
+from core.iplogger import IPLogger
 
 from flask import Flask, jsonify
 from flask_jwt_extended import JWTManager
@@ -25,7 +26,6 @@ streamhandler.setLevel(logging.DEBUG)
 logger.addHandler(streamhandler)
 logger.setLevel(logging.DEBUG)
 streamhandler.setFormatter(formatter_debug)
-
 
 
 # init config file #######################################################
@@ -48,6 +48,8 @@ config["core"]["admin"]["password"] = gen_password()
 config['core']['users'] = []
 config['core']['captcha'] = {}
 config['core']['captcha']['ttl'] = 60*5 # seconds
+config['core']['ip_logger'] = {}
+config['core']['ip_logger']['min_interval'] = 5 # seconds
 config['plugins'] = {}
 config['plugins']['ipfs'] = {}
 config['plugins']["ipfs"]["root_cid"] = ''
@@ -57,6 +59,9 @@ if not config.configfile_exists():
     config.write(commented=False)
 
 config.load(merge=False)
+
+# logs ips so we can protect ourselves from DDOSing
+ip_logger = IPLogger()
 
 # handle captchas
 captcha = Captcha(ttl=config['core']['captcha']['ttl'])
